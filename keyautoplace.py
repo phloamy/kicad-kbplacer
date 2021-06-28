@@ -5,17 +5,20 @@ import sys
 import json
 import itertools
 import logging
+import math
 
 
 class KeyPlacer():
-    def __init__(self, logger, board, layout):
+    def __init__(self, logger, board, layout, referenceLabel):
         self.logger = logger
         self.board = board
         self.layout = layout
         self.keyDistance = 19050000
         self.currentKey = 1
         self.currentDiode = 1
-        self.referenceCoordinate = wxPoint(FromMM(25), FromMM(25))
+        self.referenceCoordinate = wxPointMM(0, 0)
+
+        self.referenceLabel = referenceLabel
 
 
     def GetModule(self, reference):
@@ -34,6 +37,19 @@ class KeyPlacer():
     
     def GetCurrentDiode(self, diodeFormat):
         diode = self.GetModule(diodeFormat.format(self.currentDiode))
+        self.currentDiode += 1
+        return diode
+
+
+    def GetCurrentKeyCustom(self, keyFormat):
+        self.logger.info('Getting current key from index: {}'.format(self.currentKey - 1))
+        key = self.GetModule(keyFormat.format(self.referenceLabel["annotations"][self.currentKey - 1]))
+        self.currentKey += 1
+        return key
+
+
+    def GetCurrentDiodeCustom(self, diodeFormat):
+        diode = self.GetModule(diodeFormat.format(self.referenceLabel["annotations"][self.currentDiode - 1]))
         self.currentDiode += 1
         return diode
 
@@ -73,25 +89,50 @@ class KeyPlacer():
         self.AddTrackSegment(segmentStart, [0, 10], layer=F_Cu)
 
 
-    def Run(self, keyFormat, diodeFormat, routeTracks=False, rotateModules=False):
+    def Run(self, keyFormat, diodeFormat, routeTracks=False, rotateModules=False, useCustomAnnotationFormat=False):
         for key in self.layout["keys"]:
-            keyModule = self.GetCurrentKey(keyFormat)
-            position = wxPoint(self.referenceCoordinate.x + (self.keyDistance * key["x"]) + (self.keyDistance * key["width"] // 2), 
-                    self.referenceCoordinate.y + (self.keyDistance * key["y"]) + (self.keyDistance * key["height"] // 2))
+
+            position = wxPoint(
+                self.referenceCoordinate.x + (self.keyDistance * key["x"]) + (self.keyDistance * key["width"] // 2),
+                self.referenceCoordinate.y + (self.keyDistance * key["y"]) + (self.keyDistance * key["height"] // 2))
+
+            keyModule = None
+            if useCustomAnnotationFormat == True:
+                keyModule = self.GetCurrentKeyCustom(keyFormat)
+            else:
+                keyModule = self.GetCurrentKey(keyFormat)
+
             self.SetPosition(keyModule, position)
 
-            # something is not quite right, not recomented to use it yet:
-            if rotateModules == True:
-                rotationReference = wxPoint(self.referenceCoordinate.x + (self.keyDistance * key["rotation_x"]) + (self.keyDistance * key["width"] // 2), 
-                        self.referenceCoordinate.y + (self.keyDistance * key["rotation_y"]) + (self.keyDistance * key["height"] // 2))
-                keyModule.Rotate(rotationReference, key["rotation_angle"] * -10)
 
-            diodeModule = self.GetCurrentDiode(diodeFormat)
-            self.SetRelativePositionMM(diodeModule, position, [5.08, 3.03])
-            diodeModule.SetOrientationDegrees(270)
+            diodeModule = None
+            if useCustomAnnotationFormat == True:
+                diodeModule = self.GetCurrentDiodeCustom(diodeFormat)
+            else:
+                diodeModule = self.GetCurrentDiode(diodeFormat)
+
+            self.SetRelativePositionMM(diodeModule, position, [0, -5.05])
 
             if not diodeModule.IsFlipped():
                 diodeModule.Flip(diodeModule.GetPosition())
+
+            # something is not quite right, not recomented to use it yet:
+            if rotateModules == True:
+
+                rotationReference = wxPoint(
+                            self.referenceCoordinate.x + (self.keyDistance * key["rotation_x"]),
+                            self.referenceCoordinate.y + (self.keyDistance * key["rotation_y"])
+                            )
+
+                angle = key["rotation_angle"] * -10
+
+                keyModule.SetOrientationDegrees(180)
+                keyModule.Rotate(rotationReference, angle)
+                self.logger.info('Rotated key module to {}'.format(angle))
+
+                diodeModule.SetOrientationDegrees(180)
+                diodeModule.Rotate(rotationReference, angle)
+                self.logger.info('Rotated diode module to {}'.format(angle))
 
             if routeTracks == True:
                 self.RouteKeyWithDiode(keyModule, diodeModule)
@@ -115,7 +156,7 @@ class KeyAutoPlaceDialog(wx.Dialog):
         keyAnnotationLabel = wx.StaticText(self, -1, "Key annotation format string:")
         row2.Add(keyAnnotationLabel, 1, wx.LEFT|wx.RIGHT|wx.ALIGN_CENTER_VERTICAL, 5)
 
-        keyAnnotationFormat = wx.TextCtrl(self, value='MX_{}')
+        keyAnnotationFormat = wx.TextCtrl(self, value='K_{}')
         row2.Add(keyAnnotationFormat, 1, wx.EXPAND|wx.ALL, 5)
 
         row3 = wx.BoxSizer(wx.HORIZONTAL)
@@ -129,12 +170,28 @@ class KeyAutoPlaceDialog(wx.Dialog):
         row4 = wx.BoxSizer(wx.HORIZONTAL)
 
         tracksCheckbox = wx.CheckBox(self, label="Add tracks")
-        tracksCheckbox.SetValue(True)
+        tracksCheckbox.SetValue(False)
         row4.Add(tracksCheckbox, 1, wx.EXPAND|wx.ALL, 5)
 
         rotationCheckbox = wx.CheckBox(self, label="Enable rotations")
         rotationCheckbox.SetValue(False)
         row4.Add(rotationCheckbox, 1, wx.EXPAND|wx.ALL, 5)
+
+        # example: K_Backspace1
+
+        row5 = wx.BoxSizer(wx.HORIZONTAL)
+
+        customAnnotationFormatCheckbox = wx.CheckBox(self, label="Use custom annotation format to search for reference")
+        customAnnotationFormatCheckbox.SetValue(True)
+        row5.Add(customAnnotationFormatCheckbox, 1, wx.EXPAND | wx.ALL, 5)
+
+        row6 = wx.BoxSizer(wx.HORIZONTAL)
+
+        text2 = wx.StaticText(self, -1, "Select custom annotation json file:")
+        row6.Add(text2, 0, wx.LEFT | wx.RIGHT | wx.ALIGN_CENTER_VERTICAL, 5)
+
+        filePicker2 = wx.FilePickerCtrl(self, -1)
+        row6.Add(filePicker2, 1, wx.EXPAND | wx.ALL, 5)
 
         box = wx.BoxSizer(wx.VERTICAL)
 
@@ -142,6 +199,8 @@ class KeyAutoPlaceDialog(wx.Dialog):
         box.Add(row2, 0, wx.EXPAND|wx.ALL, 5)
         box.Add(row3, 0, wx.EXPAND|wx.ALL, 5)
         box.Add(row4, 0, wx.EXPAND|wx.ALL, 5)
+        box.Add(row5, 0, wx.EXPAND|wx.ALL, 5)
+        box.Add(row6, 0, wx.EXPAND|wx.ALL, 5)
 
         buttons = self.CreateButtonSizer(wx.OK|wx.CANCEL)
         box.Add(buttons, 0, wx.EXPAND|wx.ALL, 5)
@@ -152,6 +211,8 @@ class KeyAutoPlaceDialog(wx.Dialog):
         self.diodeAnnotationFormat = diodeAnnotationFormat
         self.tracksCheckbox = tracksCheckbox
         self.rotationCheckbox = rotationCheckbox
+        self.customAnnotationFormatCheckbox = customAnnotationFormatCheckbox
+        self.filePicker2 = filePicker2
 
 
     def GetJsonPath(self):
@@ -173,10 +234,18 @@ class KeyAutoPlaceDialog(wx.Dialog):
     def IsRotation(self):
         return self.rotationCheckbox.GetValue()
 
+
+    def IsUsingCustomAnnotationFormat(self):
+        return self.customAnnotationFormatCheckbox.GetValue()
+
+
+    def GetCustomAnnotationJsonPath(self):
+        return self.filePicker2.GetPath()
+
         
 class KeyAutoPlace(ActionPlugin):
     def defaults(self):
-        self.name = "KeyAutoPlace"
+        self.name = "KeyAutoPlaceRev1"
         self.category = "Mechanical Keybaord Helper"
         self.description = "Auto placement for key switches and diodes"
 
@@ -214,8 +283,19 @@ class KeyAutoPlace(ActionPlugin):
             f.close()
             layout = json.loads(textInput)
             self.logger.info("User layout: {}".format(layout))
-            placer = KeyPlacer(self.logger, self.board, layout)
-            placer.Run(dlg.GetKeyAnnotationFormat(), dlg.GetDiodeAnnotationFormat(), dlg.IsTracks(), dlg.IsRotation())
+
+            referenceLabel = None
+
+            if dlg.IsUsingCustomAnnotationFormat() == True:
+                annotationLabelPath = dlg.GetCustomAnnotationJsonPath()
+                f2 = open(annotationLabelPath, "r")
+                textInput2 = f2.read()
+                f2.close()
+                referenceLabel = json.loads(textInput2)
+                self.logger.info("User annotations: {}".format(referenceLabel))
+
+            placer = KeyPlacer(self.logger, self.board, layout, referenceLabel)
+            placer.Run(dlg.GetKeyAnnotationFormat(), dlg.GetDiodeAnnotationFormat(), dlg.IsTracks(), dlg.IsRotation(), dlg.IsUsingCustomAnnotationFormat())
 
 
         dlg.Destroy()
