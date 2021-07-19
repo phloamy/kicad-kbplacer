@@ -8,9 +8,9 @@ All PCB's for mechanical keyboards shares common properties which creates great 
 - [x] Automatic keys and diodes placement
 - [x] Support for different annotation schemes
 - [x] Basic track routing
-- [ ] Key rotation support (experimental) 
+- [x] Key rotation support
 - [ ] Footprint replacement
-- [ ] User selectable diode position in relation to key position
+- [x] User selectable diode position in relation to key position
 
 ## Installation
 - Clone this repository
@@ -30,6 +30,4 @@ All PCB's for mechanical keyboards shares common properties which creates great 
 - See created `keyautoplace.log` file (in PCB directory)
 
 ## Known bugs and limitations
-- Tested only with SOD-323F diodes. Predefined diode location might not be suitable for larger footprints and custom location is not supported without code modification
-- Tested only with KiCad version 5.1.5
-
+- Tested only with KiCad version 5.1.6
