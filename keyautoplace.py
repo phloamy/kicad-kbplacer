@@ -301,7 +301,7 @@ class KeyAutoPlaceDialog(wx.Dialog):
         
 class KeyAutoPlace(ActionPlugin):
     def defaults(self):
-        self.name = "KeyAutoPlaceRevamp"
+        self.name = "KeyAutoPlace"
         self.category = "Mechanical Keyboard Helper"
         self.description = "Auto placement for key switches and diodes"
 
